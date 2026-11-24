@@ -94,8 +94,12 @@ function quick(){
   const review=reserved.length?'<p class="wide muted">حجوزات قائمة · '+reserved.map(h=>btn(esc(itemName(h.item)+' · '+h.account),()=>{selectedStream=h.stream;dialog.close();go('live')})).join(' ')+'</p>':'';
   form('بيع سريع داخل المحل',review+select('items','القطع المتاحة',options(s.items.filter(i=>i.status==='available'),i=>itemName(i.id)+' · '+money(i.price)),false,[],true)+select('customer','الزبون',options(s.customers),true)+amount('discount','الخصم')+pay(),async data=>{await perform('quick',data);render();receipt(s.orders.at(-1));toast('تم البيع')},{keep:true});
 }
-function printView(title,content,format='a4'){
-  modal('معاينة الطباعة', '<div class="toolbar no-print">'+btn('A4',()=>printView(title,content,'a4'))+btn('٨٠ مم',()=>printView(title,content,'80'))+btn('طباعة',()=>window.print(),'primary')+'</div><article class="printSheet '+(format==='80'?'narrow':'')+'"><h2>'+esc(s.settings.name)+'</h2><p>'+esc(s.settings.phone)+' '+esc(s.settings.address)+'</p><h2>'+esc(title)+'</h2>'+content+'</article>');
+function printView(title,content,format='a4',sale=false){
+  const sizes=[['a4','A4'],['80','٨٠ مم']].map(([size,label])=>btn(label,()=>printView(title,content,size,sale),size===format?'primary':'')).join('');
+  const header=sale
+    ? '<header class="receipt-header"><div class="receipt-brand"><img alt="" src="'+esc(s.settings.logo||'./icon-192.png')+'"><div><h2>'+esc(s.settings.name)+'</h2><p>'+esc([s.settings.phone,s.settings.address].filter(Boolean).join(' · '))+'</p></div></div><strong>'+esc(title)+'</strong></header>'
+    : '<h2>'+esc(s.settings.name)+'</h2><p>'+esc(s.settings.phone)+' '+esc(s.settings.address)+'</p><h2>'+esc(title)+'</h2>';
+  modal('معاينة الطباعة','<div class="toolbar no-print">'+sizes+btn('طباعة',()=>window.print(),'primary')+'</div><article class="printSheet'+(sale?' sale-receipt':'')+(format==='80'?' narrow':'')+'">'+header+content+'</article>');
 }
 function inspect(i){form('فحص '+esc(i.code),select('status','نتيجة الفحص',[['available','متاحة للبيع'],['damaged','تالفة']])+f('defect','حالة الفحص والعيوب','area',i.defect,{wide:true}),'inspect',{fixed:{id:i.id}})}
 function count(i){form('جرد '+esc(i.code),amount('actual','الكمية الفعلية لهذه الوحدة',1)+f('adjust','تسوية حالة القطعة','checkbox',false)+f('note','سبب الفرق','area','',{wide:true}),'count',{fixed:{id:i.id}})}
@@ -180,7 +184,16 @@ function receipt(o,kind='receipt'){
   const address=esc([c?.province,c?.area,c?.address].filter(Boolean).join(' · '));
   if(kind==='parcel')return printView('ملصق طرد '+orderName(o.id),'<p>'+esc(c?.name)+' · '+esc(c?.phone)+'</p><p>'+address+'</p><p>'+esc(o.carrier)+' · '+esc(o.tracking)+'</p><p>المطلوب '+money(total+o.delivery)+'</p>','80');
   if(kind==='packing')return printView('قائمة تجهيز '+orderName(o.id),'<p>'+esc(c?.name)+'</p>'+table('printPacking',['✓','القطعة','الموقع'],o.lines.filter(l=>!l.returned).map(l=>['□',esc(itemName(l.item)),esc(pick('items',l.item)?.location)])));
-  return printView('وصل بيع '+orderName(o.id),'<p>'+esc(c?.name)+' · '+esc(when(o.deliveredAt||o.at))+'</p>'+table('printReceipt',['القطعة','السعر'],o.lines.map(l=>[esc(itemName(l.item)),money(l.net)]))+'<p>البضاعة '+money(total)+' · التوصيل '+money(o.delivery)+'</p><p>المجموع '+money(total+o.delivery)+'</p>','80');
+  const fields=c?[
+    ['الاسم الكامل',c.name],['رقم الهاتف',c.phone],['المنصّة',c.platform],
+    ['معرّف الحساب',c.account],['المحافظة',c.province],['المنطقة',c.area],
+    ['العنوان الكامل',c.address,true],['ملاحظات الزبون',c.note,true]
+  ]:[['الزبون','بيع مباشر بدون ملف زبون',true]];
+  const customer='<dl class="receipt-fields">'+fields.map(([label,value,wide])=>'<div'+(wide?' class="receipt-wide"':'')+'><dt>'+label+'</dt><dd><bdi>'+esc(value||'—')+'</bdi></dd></div>').join('')+'</dl>';
+  const meta='<div class="receipt-meta"><span>'+esc(when(o.deliveredAt||o.at))+'</span><span>'+(o.ship==='delivery'?'توصيل':'استلام من المحل')+'</span></div>';
+  const lines='<table class="receipt-lines"><thead><tr><th scope="col">القطعة</th><th scope="col">السعر الصافي</th></tr></thead><tbody>'+o.lines.map(l=>'<tr><td>'+esc(itemName(l.item))+(l.returned?' <small>راجع</small>':'')+'</td><td><bdi>'+money(l.net)+'</bdi></td></tr>').join('')+'</tbody></table>';
+  const totals='<dl class="receipt-totals"><div><dt>صافي البضاعة</dt><dd>'+money(total)+'</dd></div><div><dt>التوصيل</dt><dd>'+money(o.delivery)+'</dd></div><div class="receipt-grand"><dt>إجمالي الطلب</dt><dd>'+money(total+o.delivery)+'</dd></div></dl>';
+  return printView('وصل بيع '+orderName(o.id),meta+'<section class="receipt-customer"><h3>معلومات الزبون</h3>'+customer+'</section>'+lines+totals,'80',true);
 }
 function confirmation(o){
   const c=pick('customers',o.customer),total=o.lines.reduce((a,l)=>a+l.net,0);
@@ -465,3 +478,4 @@ function seedDemo(data){
   return d;
 }
 start().catch(e=>{setupError=e.message;renderSetup()});
+
